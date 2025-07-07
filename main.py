@@ -92,53 +92,118 @@ def categorize_complaint(text):
     else:
         return "general"
 
-def create_custom_summary(text, key_info, category):
-    """Create a custom summary based on complaint type and extracted info."""
+def create_detailed_web_summary(text, key_info, category, sentiment):
+    """Create a detailed but simple web-friendly summary."""
     
-    templates = {
-        "shipping": "Customer experienced shipping issues",
-        "billing": "Customer reports billing problem",
-        "product_defect": "Customer's product is defective/damaged",
-        "wrong_item": "Customer received incorrect item",
-        "service": "Customer had poor service experience",
-        "technical": "Customer experiencing technical issues",
-        "pricing": "Customer concerned about pricing",
-        "general": "Customer complaint"
+    # Start with the main issue
+    summary_parts = []
+    
+    # Quick overview based on category
+    category_overviews = {
+        "shipping": "Customer is experiencing shipping and delivery problems",
+        "billing": "Customer has concerns about billing or payment issues",
+        "product_defect": "Customer received a defective or damaged product",
+        "wrong_item": "Customer received the wrong item in their order",
+        "service": "Customer had a poor experience with customer service",
+        "technical": "Customer is facing technical issues with the website or app",
+        "pricing": "Customer has questions or concerns about pricing",
+        "general": "Customer has submitted a general complaint"
     }
     
-    base_summary = templates.get(category, "Customer complaint")
+    main_issue = category_overviews.get(category, "Customer complaint received")
+    
+    # Add sentiment context
+    sentiment_context = {
+        "angry": "The customer is very upset and frustrated",
+        "frustrated": "The customer is disappointed and frustrated", 
+        "polite": "The customer is being polite and understanding",
+        "neutral": "The customer is presenting their concerns calmly"
+    }
+    
+    # Build the summary
+    summary_parts.append(f"{main_issue}. {sentiment_context.get(sentiment, 'Customer feedback received')}.")
+    
+    # Add key details if available
     details = []
     
     if 'prices' in key_info:
-        if len(key_info['prices']) > 1:
-            details.append(f"involving amounts from ${min(key_info['prices'])} to ${max(key_info['prices'])}")
+        if len(key_info['prices']) == 1:
+            details.append(f"The issue involves an amount of ${key_info['prices'][0]:.2f}")
         else:
-            details.append(f"involving ${key_info['prices'][0]}")
+            total = sum(key_info['prices'])
+            details.append(f"The issue involves multiple amounts totaling ${total:.2f}")
+    
+    if 'order_numbers' in key_info:
+        details.append(f"Order reference: {key_info['order_numbers'][0]}")
     
     if 'time_periods' in key_info:
         time_detail = key_info['time_periods'][0]
-        details.append(f"over {time_detail[0]} {time_detail[1]}")
+        details.append(f"Timeline mentioned: {time_detail[0]} {time_detail[1]}")
     
-    if 'order_numbers' in key_info:
-        details.append(f"for order {key_info['order_numbers'][0]}")
-    
+    # Add specific details from text analysis
     text_lower = text.lower()
-    if 'want refund' in text_lower or 'full refund' in text_lower:
-        details.append("Customer requests refund")
+    
+    if 'refund' in text_lower:
+        details.append("Customer is requesting a refund")
     elif 'replacement' in text_lower:
-        details.append("Customer seeks replacement")
+        details.append("Customer wants a replacement item")
     elif 'cancel' in text_lower:
-        details.append("Customer wants to cancel")
+        details.append("Customer wants to cancel their order")
     
+    if 'urgent' in text_lower or 'asap' in text_lower:
+        details.append("Customer indicates this is urgent")
+    
+    if 'disappointed' in text_lower or 'expected' in text_lower:
+        details.append("Customer's expectations were not met")
+    
+    # Add details to summary
     if details:
-        summary = f"{base_summary} {', '.join(details[:2])}"
-    else:
-        summary = base_summary
+        summary_parts.append(f"Key details: {', '.join(details)}.")
     
-    return summary
+    # Add what the customer wants (resolution)
+    resolution_hints = []
+    if 'want' in text_lower:
+        if 'money back' in text_lower or 'refund' in text_lower:
+            resolution_hints.append("wants their money back")
+        elif 'fix' in text_lower or 'resolve' in text_lower:
+            resolution_hints.append("wants the issue fixed")
+        elif 'speak' in text_lower or 'manager' in text_lower:
+            resolution_hints.append("wants to speak with a manager")
+    
+    if resolution_hints:
+        summary_parts.append(f"The customer {' and '.join(resolution_hints)}.")
+    
+    # Add priority level
+    priority_levels = {
+        "angry": "This requires immediate attention due to the customer's frustration level",
+        "frustrated": "This should be handled promptly to prevent further frustration",
+        "polite": "This can be handled through normal channels with good follow-up",
+        "neutral": "This can be processed through standard procedures"
+    }
+    
+    summary_parts.append(priority_levels.get(sentiment, "Standard handling procedures apply."))
+    
+    # Add suggested next steps
+    next_steps = {
+        "shipping": "Check tracking information and contact the shipping carrier",
+        "billing": "Review the customer's account and billing history",
+        "product_defect": "Arrange for return/replacement and check quality control",
+        "wrong_item": "Send correct item and arrange pickup of wrong item",
+        "service": "Have a supervisor review the service interaction",
+        "technical": "Forward to technical support team for investigation",
+        "pricing": "Review pricing and provide clear explanation to customer",
+        "general": "Route to appropriate department for comprehensive review"
+    }
+    
+    summary_parts.append(f"Recommended action: {next_steps.get(category, 'Review and respond appropriately.')}")
+    
+    # Join everything together
+    web_summary = " ".join(summary_parts)
+    
+    return web_summary
 
 async def get_ai_summary(text):
-    """Get AI-generated summary."""
+    """Get AI-generated summary with much longer output."""
     
     for model_name, model_id in SUMMARIZATION_MODELS.items():
         try:
@@ -146,11 +211,13 @@ async def get_ai_summary(text):
             payload = {
                 "inputs": text,
                 "parameters": {
-                    "min_length": 15,
-                    "max_length": 50,
-                    "do_sample": False,
-                    "length_penalty": 2.0,
-                    "num_beams": 4
+                    "min_length": 100,  # Much longer minimum
+                    "max_length": 500,  # Much longer maximum
+                    "do_sample": True,
+                    "length_penalty": 0.5,  # Encourage longer outputs
+                    "num_beams": 4,
+                    "temperature": 0.7,
+                    "repetition_penalty": 1.1
                 }
             }
             
@@ -188,25 +255,16 @@ async def summarize(complaint: ComplaintRequest):
     category = categorize_complaint(original_text)
     sentiment = detect_sentiment(original_text)
     
-    summary = None
+    # Always create detailed web-friendly summary
+    summary = create_detailed_web_summary(original_text, key_info, category, sentiment)
     
-    if original_word_count < 20:
-        summary = create_custom_summary(original_text, key_info, category)
-    else:
-        summary = await get_ai_summary(original_text)
-        
-        if not summary:
-            summary = create_custom_summary(original_text, key_info, category)
+    # Try to get AI summary as well and append it
+    ai_summary = await get_ai_summary(original_text)
+    
+    if ai_summary:
+        summary += f"\n\nAI-GENERATED SUPPLEMENTARY ANALYSIS:\n{ai_summary}"
     
     summary = clean_text(summary)
-    
-    if summary == original_text[:len(summary)]:
-        summary = create_custom_summary(original_text, key_info, category)
-    
-    if len(summary.split()) >= original_word_count:
-        sentences = simple_sentence_split(summary)
-        summary = sentences[0] if sentences else summary[:100] + "..."
-    
     summary_word_count = len(summary.split())
 
     return {
